@@ -1,19 +1,16 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import httpx
 import os
-import re
+import json
+import sys
+
+sys.stdout.reconfigure(encoding='utf-8')
 
 app = FastAPI()
 
 API_KEY_FILE = "api_key.txt"
-
-FALLBACK_FUNDS = {
-    '161039': {'name': '中证500指数增强A', 'nav': 1.8234, 'change': 0.87},
-    '000001': {'name': '上证指数', 'nav': 3420.55, 'change': -0.32},
-    '110011': {'name': '易方达消费行业股票', 'nav': 3.2456, 'change': 1.23},
-    '161725': {'name': '招商中证白酒指数', 'nav': 0.9876, 'change': -0.56},
-}
 
 
 class LLMConfig(BaseModel):
@@ -26,6 +23,14 @@ class LLMRequest(BaseModel):
 
 class FundQuery(BaseModel):
     code: str
+
+
+class FundResponse(BaseModel):
+    code: str
+    name: str
+    nav: float
+    change: float
+    source: str
 
 
 @app.post("/api/llm/config")
@@ -81,40 +86,48 @@ async def query_fund(query: FundQuery):
     if not code:
         raise HTTPException(status_code=400, detail="请输入基金代码")
 
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Referer': 'https://fund.eastmoney.com/'
-    }
-
     async with httpx.AsyncClient() as client:
-        try:
-            fund_url = f"https://fund.eastmoney.com/pingzhongdata/{code}.js"
-            response = await client.get(fund_url, headers=headers, timeout=10.0)
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Referer': 'https://fund.eastmoney.com/',
+            'Accept-Charset': 'utf-8'
+        }
 
-            if response.status_code == 200:
-                js_content = response.text
+        gz_url = f"https://fundgz.1234567.com.cn/js/{code}.js"
+        gz_response = await client.get(gz_url, headers=headers, timeout=10.0)
 
-                name_match = re.search(r'fbrg\.name\s*=\s*"([^"]+)"', js_content)
-                nav_match = re.search(r'fbrg\.dwjz\s*=\s*([0-9.]+)', js_content)
-                change_match = re.search(r'fbrg\.jjgs\s*=\s*([-+]?[0-9.]+)', js_content)
-
-                if name_match and nav_match:
-                    fund_data = {
-                        'name': name_match.group(1),
-                        'nav': float(nav_match.group(1)),
-                        'change': float(change_match.group(1)) if change_match else 0.0,
+        if gz_response.status_code == 200:
+            content = gz_response.text
+            if 'jsonpgz' in content and content.find('{') != -1:
+                start = content.find('({') + 1
+                end = content.rfind('})') + 1
+                if start > 0 and end > 0:
+                    gz_data = json.loads(content[start:end])
+                    result = {
                         'code': code,
-                        'source': '天天基金网'
+                        'name': gz_data.get('name', code),
+                        'nav': float(gz_data.get('dwjz', 0)),
+                        'change': float(gz_data.get('gszzl', 0)),
+                        'source': '天天基金网(实时估值)'
                     }
-                    return fund_data
-        except Exception as e:
-            print(f"爬取失败: {e}")
+                    return JSONResponse(content=result, media_type="application/json; charset=utf-8")
 
-    if code in FALLBACK_FUNDS:
-        data = FALLBACK_FUNDS[code].copy()
-        data['code'] = code
-        data['source'] = '备用数据'
-        return data
+        api_url = f"https://api.fund.eastmoney.com/f10/lsjz?fundCode={code}&pageIndex=1&pageSize=1"
+        api_response = await client.get(api_url, headers=headers, timeout=10.0)
+
+        if api_response.status_code == 200:
+            data = api_response.json()
+            if data.get('Data') and data['Data'].get('LSJZList'):
+                latest = data['Data']['LSJZList'][0]
+                name_match = data['Data'].get('CodeName') or code
+                result = {
+                    'code': code,
+                    'name': name_match,
+                    'nav': float(latest.get('DWJZ', 0)),
+                    'change': float(latest.get('JZZZL', 0)),
+                    'source': '天天基金网(历史净值)'
+                }
+                return JSONResponse(content=result, media_type="application/json; charset=utf-8")
 
     raise HTTPException(status_code=404, detail=f"未找到基金代码: {code}")
 
