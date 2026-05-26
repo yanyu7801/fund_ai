@@ -162,11 +162,17 @@ function App() {
     setAiError('')
     setAiAnalysis('')
     try {
+      let holdingsText = ''
+      if (holdingsData?.holdings) {
+        holdingsText = '\n持仓股票：\n' + holdingsData.holdings.map(h =>
+          `  ${h.stockName}(${h.stockCode}) 占比${h.percent}%${h.change !== null ? ` 今日涨跌${h.change >= 0 ? '+' : ''}${h.change}%` : ''}`
+        ).join('\n')
+      }
       const res = await fetch('/api/llm/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          prompt: `请分析基金 ${fundData.name}(${fundData.code})，当前净值: ${fundData.nav}，涨跌幅: ${fundData.change}%。给出简要评价和建议。`
+          prompt: `请分析基金 ${fundData.name}(${fundData.code})，当前净值: ${fundData.nav}，涨跌幅: ${fundData.change}%。${holdingsText}\n\n请结合当前A股市场的主流热点和板块轮动趋势，从持仓结构角度评价该基金的投资价值，给出简要建议（300字以内）。`
         })
       })
       const body = await res.text()
