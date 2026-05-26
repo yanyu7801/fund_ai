@@ -109,3 +109,57 @@ AI 分析请求失败时，前端报 JSON 解析错误（`Unexpected token...`�
 ### 2. 前端 `frontend/src/App.tsx`
 - `analyzeWithAI` 函数：`res.json()` 失败时自动回退到 `res.text()` 获取原始错误信息
 - 避免 "Unexpected token" 类 JSON 解析错误暴露给用户
+
+---
+
+# 基金分析助手 - 修改记录 (2026-05-26)
+
+## 1. 持仓股票添加当日涨跌幅列
+
+### 后端 `backend/app/main.py`
+- `POST /api/fund/holdings` 新增批量查询股票实时行情
+- 使用 `push2.eastmoney.com/api/qt/ulist.np/get` 接口
+- 股票代码前缀规则：`6xxxxx` → `1.`，其余 → `0.`
+- 返回字段 `change`（涨跌幅百分比），获取失败时为 `null`
+
+### 前端 `frontend/src/App.tsx`
+- `Holding` 接口新增 `change: number | null`
+- 持仓表格新增"涨跌幅"列
+- 颜色规则：红色涨、绿色跌（A股惯例）
+
+## 2. 最大回撤排行（横向柱状图）
+
+### 后端 `backend/app/main.py`
+- 新增 `POST /api/fund/drawdowns`
+- 爬取 `fund.eastmoney.com/pingzhongdata/{code}.js` 获取全部历史累计净值
+- 计算成立以来每次超过 5% 的回撤事件
+- 回撤周期定义：从峰值到下一次创新高为一个完整周期
+- `endDate` 为最低点日期（非恢复日期）
+- 返回字段：`startDate`, `endDate`, `maxDrawdown`, `duration` 等
+
+### 前端 `frontend/src/App.tsx`
+- 新增 `Drawdown`/`DrawdownsData` 接口
+- 持仓板块下新增"最大回撤"区域
+- 使用 recharts `BarChart` + `layout="vertical"` 渲染横向柱状图
+- Y 轴标签显示时间区间（如 `2021-06-07~2026-05-25`）
+
+## 3. AI 分析提示词优化
+
+### 前端 `frontend/src/App.tsx`
+- AI 分析时自动带入持仓股票名称、代码、占比、当日涨跌幅
+- 指示模型"结合当前 A 股市场的主流热点和板块轮动趋势"进行分析
+- 输出限制 300 字以内
+
+## 4. 错误处理与稳定性优化
+
+### 后端 `backend/app/main.py`
+- 添加全局 `@app.exception_handler(Exception)`，所有错误返回 JSON
+- `httpx.ConnectError` → 502 + 中文提示
+- `httpx.TimeoutException` → 504 + 中文提示
+- 未知异常 → 500 + `"服务内部错误: ..."`
+- 所有 httpx 客户端添加 `follow_redirects=True`（东方财富部分 API 会 302 跳转）
+- 超时从 10s 调整为 15s
+
+### 前端 `frontend/src/App.tsx`
+- `queryFund`、`fetchHoldings`、`fetchDrawdowns` 全部改用 `res.text()` + `JSON.parse()` 模式
+- 非 JSON 响应直接抛出原文作为错误信息，避免 "Unexpected token" 类错误
