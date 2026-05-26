@@ -257,11 +257,11 @@ async def fund_drawdowns(query: FundQuery):
                 if max_dd < -5:
                     drawdowns.append({
                         'startDate': timestamp_to_date(nav_data[dd_start_idx][0]),
-                        'endDate': timestamp_to_date(ts),
+                        'endDate': timestamp_to_date(nav_data[dd_trough_idx][0]),
                         'peakDate': timestamp_to_date(peak_date),
                         'troughDate': timestamp_to_date(nav_data[dd_trough_idx][0]),
                         'maxDrawdown': round(max_dd, 2),
-                        'duration': i - dd_start_idx,
+                        'duration': dd_trough_idx - dd_start_idx,
                     })
                 in_drawdown = False
             peak_nav = nav
