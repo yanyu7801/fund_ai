@@ -179,7 +179,30 @@ async def fund_holdings(query: FundQuery):
                 'stockCode': stock_code,
                 'stockName': stock_name,
                 'percent': pct,
+                'change': None,
             })
+
+        # 批量获取股票实时涨跌幅
+        if holdings:
+            secids = []
+            for h in holdings:
+                sc = h['stockCode']
+                prefix = '1.' if sc.startswith('6') else '0.'
+                secids.append(f"{prefix}{sc}")
+            quote_url = f"https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids={','.join(secids)}&fields=f3,f12"
+            try:
+                quote_resp = await client.get(quote_url, headers=headers, timeout=10.0, follow_redirects=True)
+                if quote_resp.status_code == 200:
+                    qdata = quote_resp.json()
+                    if qdata.get('data') and qdata['data'].get('diff'):
+                        change_map = {}
+                        for item in qdata['data']['diff']:
+                            change_map[item['f12']] = item.get('f3')
+                        for h in holdings:
+                            if h['stockCode'] in change_map:
+                                h['change'] = change_map[h['stockCode']]
+            except Exception:
+                pass
 
         return JSONResponse(content={
             'code': code,

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts'
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts'
 
 const DarkYellowStyle = {
   colors: {
@@ -30,6 +30,7 @@ interface Holding {
   stockCode: string
   stockName: string
   percent: number
+  change: number | null
 }
 
 interface HoldingsData {
@@ -314,7 +315,7 @@ function App() {
                   </div>
                   <div style={{
                     fontSize: '14px',
-                    color: fundData.change >= 0 ? DarkYellowStyle.colors.success : DarkYellowStyle.colors.error,
+                    color: fundData.change >= 0 ? DarkYellowStyle.colors.error : DarkYellowStyle.colors.success,
                   }}>
                     {fundData.change >= 0 ? '+' : ''}{fundData.change}%
                   </div>
@@ -367,13 +368,13 @@ function App() {
                           cx="50%"
                           cy="55%"
                           outerRadius={90}
-                          label={({ stockName, percent, cx, cy, midAngle, outerRadius }) => {
+                          label={({ stockName, percent, cx, cy, midAngle = 0, outerRadius }: any) => {
                             const RADIAN = Math.PI / 180
                             const radius = outerRadius + 30
-                            const x = cx + radius * Math.cos(-midAngle * RADIAN)
-                            const y = cy + radius * Math.sin(-midAngle * RADIAN)
+                            const x = (cx as number) + radius * Math.cos(-midAngle * RADIAN)
+                            const y = (cy as number) + radius * Math.sin(-midAngle * RADIAN)
                             return (
-                              <text x={x} y={y} fontSize={11} fill={DarkYellowStyle.colors.textLight} textAnchor={x > cx ? 'start' : 'end'}>
+                              <text x={x} y={y} fontSize={11} fill={DarkYellowStyle.colors.textLight} textAnchor={x > (cx as number) ? 'start' : 'end'}>
                                 {stockName} {percent}%
                               </text>
                             )
@@ -384,7 +385,7 @@ function App() {
                             <Cell key={idx} fill={COLORS[idx % COLORS.length]} />
                           ))}
                         </Pie>
-                        <Tooltip formatter={(value: number) => `${value}%`} />
+                        <Tooltip formatter={(value: any) => `${value}%`} />
                       </PieChart>
                     </ResponsiveContainer>
                   </div>
@@ -431,6 +432,7 @@ function App() {
                         <th style={{ textAlign: 'left', padding: '8px 4px', color: DarkYellowStyle.colors.textLight }}>排名</th>
                         <th style={{ textAlign: 'left', padding: '8px 4px', color: DarkYellowStyle.colors.textLight }}>股票名称</th>
                         <th style={{ textAlign: 'right', padding: '8px 4px', color: DarkYellowStyle.colors.textLight }}>占比</th>
+                        <th style={{ textAlign: 'right', padding: '8px 4px', color: DarkYellowStyle.colors.textLight }}>涨跌幅</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -445,6 +447,12 @@ function App() {
                           </td>
                           <td style={{ padding: '8px 4px', textAlign: 'right', color: DarkYellowStyle.colors.primary, fontWeight: 500 }}>
                             {h.percent}%
+                          </td>
+                          <td style={{
+                            padding: '8px 4px', textAlign: 'right', fontWeight: 500,
+                            color: h.change !== null ? (h.change >= 0 ? DarkYellowStyle.colors.error : DarkYellowStyle.colors.success) : DarkYellowStyle.colors.textLight,
+                          }}>
+                            {h.change !== null ? `${h.change >= 0 ? '+' : ''}${h.change}%` : '-'}
                           </td>
                         </tr>
                       ))}
