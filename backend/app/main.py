@@ -211,6 +211,98 @@ async def fund_holdings(query: FundQuery):
         }, media_type="application/json; charset=utf-8")
 
 
+@app.post("/api/fund/drawdowns")
+async def fund_drawdowns(query: FundQuery):
+    code = query.code.strip()
+    if not code:
+        raise HTTPException(status_code=400, detail="请输入基金代码")
+
+    async with httpx.AsyncClient(follow_redirects=True) as client:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Referer': 'https://fund.eastmoney.com/',
+        }
+        url = f"https://fund.eastmoney.com/pingzhongdata/{code}.js"
+        resp = await client.get(url, headers=headers, timeout=15.0)
+        if resp.status_code != 200:
+            raise HTTPException(status_code=502, detail="获取基金数据失败")
+
+        m = re.search(r'var Data_ACWorthTrend\s*=\s*(\[.*?\])\s*;', resp.text, re.DOTALL)
+        if not m:
+            raise HTTPException(status_code=502, detail="未找到净值数据")
+        nav_data = json.loads(m.group(1))
+
+    # 按日期升序排序
+    nav_data.sort(key=lambda x: x[0])
+    if len(nav_data) < 2:
+        return JSONResponse(content={'code': code, 'drawdowns': []})
+
+    # 计算回撤：从峰值到下一次创新高为一个完整回撤周期
+    peak_nav = nav_data[0][1]
+    peak_date = nav_data[0][0]
+    peak_idx = 0
+    drawdowns = []
+    dd_trough_idx = 0
+    dd_trough_nav = nav_data[0][1]
+    in_drawdown = False
+    dd_start_idx = 0
+
+    for i in range(1, len(nav_data)):
+        ts, nav = nav_data[i]
+
+        if nav >= peak_nav:
+            # 创新高，结束当前回撤（如有）
+            if in_drawdown:
+                max_dd = (dd_trough_nav - peak_nav) / peak_nav * 100
+                if max_dd < -5:
+                    drawdowns.append({
+                        'startDate': timestamp_to_date(nav_data[dd_start_idx][0]),
+                        'endDate': timestamp_to_date(ts),
+                        'peakDate': timestamp_to_date(peak_date),
+                        'troughDate': timestamp_to_date(nav_data[dd_trough_idx][0]),
+                        'maxDrawdown': round(max_dd, 2),
+                        'duration': i - dd_start_idx,
+                    })
+                in_drawdown = False
+            peak_nav = nav
+            peak_date = ts
+            peak_idx = i
+        else:
+            dd = (nav - peak_nav) / peak_nav * 100
+            if not in_drawdown and dd < -5:
+                in_drawdown = True
+                dd_start_idx = peak_idx
+                dd_trough_idx = i
+                dd_trough_nav = nav
+            elif in_drawdown:
+                if nav < dd_trough_nav:
+                    dd_trough_idx = i
+                    dd_trough_nav = nav
+
+    # 处理仍在进行中的回撤
+    if in_drawdown:
+        max_dd = (dd_trough_nav - peak_nav) / peak_nav * 100
+        if max_dd < -5:
+            drawdowns.append({
+                'startDate': timestamp_to_date(nav_data[dd_start_idx][0]),
+                'endDate': timestamp_to_date(nav_data[-1][0]),
+                'peakDate': timestamp_to_date(peak_date),
+                'troughDate': timestamp_to_date(nav_data[dd_trough_idx][0]),
+                'maxDrawdown': round(max_dd, 2),
+                'duration': len(nav_data) - 1 - dd_start_idx,
+            })
+
+    return JSONResponse(content={
+        'code': code,
+        'drawdowns': drawdowns,
+    }, media_type="application/json; charset=utf-8")
+
+
+def timestamp_to_date(ts):
+    from datetime import datetime
+    return datetime.fromtimestamp(ts / 1000).strftime('%Y-%m-%d')
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

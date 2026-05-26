@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts'
+import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts'
 
 const DarkYellowStyle = {
   colors: {
@@ -39,6 +39,20 @@ interface HoldingsData {
   holdings: Holding[]
 }
 
+interface Drawdown {
+  startDate: string
+  endDate: string
+  peakDate: string
+  troughDate: string
+  maxDrawdown: number
+  duration: number
+}
+
+interface DrawdownsData {
+  code: string
+  drawdowns: Drawdown[]
+}
+
 const COLORS = ['#FFD700', '#FFA500', '#FF6B6B', '#52C41A', '#1890FF', '#722ED1', '#EB2F96', '#13C2C2', '#FA8C16', '#2F54EB']
 
 function App() {
@@ -60,6 +74,10 @@ function App() {
   const [holdingsData, setHoldingsData] = useState<HoldingsData | null>(null)
   const [holdingsLoading, setHoldingsLoading] = useState(false)
   const [holdingsError, setHoldingsError] = useState('')
+
+  const [drawdownsData, setDrawdownsData] = useState<DrawdownsData | null>(null)
+  const [_drawdownsLoading, setDrawdownsLoading] = useState(false)
+  const [_drawdownsError, setDrawdownsError] = useState('')
 
   useEffect(() => {
     checkConfig()
@@ -116,6 +134,8 @@ function App() {
     setAiAnalysis('')
     setHoldingsData(null)
     setHoldingsError('')
+    setDrawdownsData(null)
+    setDrawdownsError('')
     try {
       const res = await fetch('/api/fund/query', {
         method: 'POST',
@@ -126,6 +146,7 @@ function App() {
       if (res.ok) {
         setFundData(data)
         fetchHoldings(fundCode.trim())
+        fetchDrawdowns(fundCode.trim())
       } else {
         setFundError(data.detail || '查询失败')
       }
@@ -154,6 +175,27 @@ function App() {
       setHoldingsError(`网络错误: ${e.message}`)
     }
     setHoldingsLoading(false)
+  }
+
+  const fetchDrawdowns = async (code: string) => {
+    setDrawdownsLoading(true)
+    setDrawdownsError('')
+    try {
+      const res = await fetch('/api/fund/drawdowns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code })
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setDrawdownsData(data)
+      } else {
+        setDrawdownsError(data.detail || '获取回撤数据失败')
+      }
+    } catch (e: any) {
+      setDrawdownsError(`网络错误: ${e.message}`)
+    }
+    setDrawdownsLoading(false)
   }
 
   const analyzeWithAI = async () => {
@@ -465,6 +507,47 @@ function App() {
                     </tbody>
                   </table>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {drawdownsData && drawdownsData.drawdowns.length > 0 && (
+            <div style={{
+              backgroundColor: DarkYellowStyle.colors.inputBg,
+              borderRadius: '8px',
+              padding: '20px',
+              marginBottom: '20px',
+            }}>
+              <h3 style={{ margin: '0 0 4px 0', color: DarkYellowStyle.colors.primary, fontSize: '16px' }}>
+                最大回撤
+              </h3>
+              <div style={{ fontSize: '12px', color: DarkYellowStyle.colors.textLight, marginBottom: '16px' }}>
+                成立以来超过5%的回撤记录（共{drawdownsData.drawdowns.length}次）
+              </div>
+              <div style={{ width: '100%', height: Math.max(200, drawdownsData.drawdowns.length * 40) }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={drawdownsData.drawdowns.map(d => ({
+                      ...d,
+                      label: `${d.startDate}~${d.endDate === d.troughDate ? d.troughDate : d.endDate}`,
+                      absDrawdown: Math.abs(d.maxDrawdown),
+                    })).reverse()}
+                    layout="vertical"
+                    margin={{ top: 0, right: 20, left: 80, bottom: 0 }}
+                  >
+                    <XAxis type="number" domain={[0, 'auto']} tick={{ fill: DarkYellowStyle.colors.textLight, fontSize: 11 }} unit="%" />
+                    <YAxis type="category" dataKey="label" width={80} tick={{ fill: DarkYellowStyle.colors.textLight, fontSize: 10 }} />
+                    <Tooltip
+                      formatter={(_: any, __: any, props: any) => {
+                        const d = props.payload
+                        return [`${d.maxDrawdown}%`, `回撤`]
+                      }}
+                      labelFormatter={() => ''}
+                      contentStyle={{ backgroundColor: '#2d2d2d', border: '1px solid #444', fontSize: 12 }}
+                    />
+                    <Bar dataKey="absDrawdown" fill="#FF6B6B" radius={[0, 3, 3, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
               </div>
             </div>
           )}
