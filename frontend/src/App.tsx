@@ -142,7 +142,9 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code: fundCode.trim() })
       })
-      const data = await res.json()
+      const body = await res.text()
+      let data
+      try { data = JSON.parse(body) } catch { throw new Error(body || `请求失败 (${res.status})`) }
       if (res.ok) {
         setFundData(data)
         fetchHoldings(fundCode.trim())
@@ -165,7 +167,9 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code })
       })
-      const data = await res.json()
+      const body = await res.text()
+      let data
+      try { data = JSON.parse(body) } catch { throw new Error(body || `请求失败 (${res.status})`) }
       if (res.ok) {
         setHoldingsData(data)
       } else {
@@ -186,7 +190,9 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code })
       })
-      const data = await res.json()
+      const body = await res.text()
+      let data
+      try { data = JSON.parse(body) } catch { throw new Error(body || `请求失败 (${res.status})`) }
       if (res.ok) {
         setDrawdownsData(data)
       } else {

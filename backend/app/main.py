@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import httpx
@@ -6,10 +6,19 @@ import os
 import json
 import sys
 import re
+import traceback
 
 sys.stdout.reconfigure(encoding='utf-8')
 
 app = FastAPI()
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    traceback.print_exc()
+    if isinstance(exc, HTTPException):
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    return JSONResponse(status_code=500, content={"detail": "Internal server error: " + repr(exc)[:200]})
 
 API_KEY_FILE = "api_key.txt"
 
