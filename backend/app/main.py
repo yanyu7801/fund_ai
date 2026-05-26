@@ -113,7 +113,7 @@ async def query_fund(query: FundQuery):
         raise HTTPException(status_code=400, detail="请输入基金代码")
 
     try:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(follow_redirects=True) as client:
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                 'Referer': 'https://fund.eastmoney.com/',
@@ -121,7 +121,7 @@ async def query_fund(query: FundQuery):
             }
 
             gz_url = f"https://fundgz.1234567.com.cn/js/{code}.js"
-            gz_response = await client.get(gz_url, headers=headers, timeout=10.0)
+            gz_response = await client.get(gz_url, headers=headers, timeout=15.0)
 
             if gz_response.status_code == 200:
                 content = gz_response.text
@@ -140,7 +140,7 @@ async def query_fund(query: FundQuery):
                         return JSONResponse(content=result, media_type="application/json; charset=utf-8")
 
             api_url = f"https://api.fund.eastmoney.com/f10/lsjz?fundCode={code}&pageIndex=1&pageSize=1"
-            api_response = await client.get(api_url, headers=headers, timeout=10.0)
+            api_response = await client.get(api_url, headers=headers, timeout=15.0)
 
             if api_response.status_code == 200:
                 data = api_response.json()
@@ -170,14 +170,14 @@ async def fund_holdings(query: FundQuery):
         raise HTTPException(status_code=400, detail="请输入基金代码")
 
     try:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(follow_redirects=True) as client:
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                 'Referer': 'https://fundf10.eastmoney.com/',
             }
 
             url = f"https://fundf10.eastmoney.com/FundArchivesDatas.aspx?type=jjcc&code={code}&topline=10&year=&month=&rt=0."
-            response = await client.get(url, headers=headers, timeout=10.0)
+            response = await client.get(url, headers=headers, timeout=15.0)
 
             if response.status_code != 200:
                 raise HTTPException(status_code=502, detail="获取持仓数据失败")
@@ -211,7 +211,7 @@ async def fund_holdings(query: FundQuery):
                     secids.append(f"{prefix}{sc}")
                 quote_url = f"https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids={','.join(secids)}&fields=f3,f12"
                 try:
-                    quote_resp = await client.get(quote_url, headers=headers, timeout=10.0, follow_redirects=True)
+                    quote_resp = await client.get(quote_url, headers=headers, timeout=15.0)
                     if quote_resp.status_code == 200:
                         qdata = quote_resp.json()
                         if qdata.get('data') and qdata['data'].get('diff'):
