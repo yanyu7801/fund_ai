@@ -18,7 +18,12 @@ async def global_exception_handler(request: Request, exc: Exception):
     traceback.print_exc()
     if isinstance(exc, HTTPException):
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
-    return JSONResponse(status_code=500, content={"detail": "Internal server error: " + repr(exc)[:200]})
+    if isinstance(exc, httpx.ConnectError):
+        return JSONResponse(status_code=502, content={"detail": "无法连接到外部服务，请检查网络"})
+    if isinstance(exc, httpx.TimeoutException):
+        return JSONResponse(status_code=504, content={"detail": "外部服务请求超时，请重试"})
+    err_msg = repr(exc)[:200]
+    return JSONResponse(status_code=500, content={"detail": f"服务内部错误: {err_msg}"})
 
 API_KEY_FILE = "api_key.txt"
 
@@ -107,50 +112,55 @@ async def query_fund(query: FundQuery):
     if not code:
         raise HTTPException(status_code=400, detail="请输入基金代码")
 
-    async with httpx.AsyncClient() as client:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Referer': 'https://fund.eastmoney.com/',
-            'Accept-Charset': 'utf-8'
-        }
+    try:
+        async with httpx.AsyncClient() as client:
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Referer': 'https://fund.eastmoney.com/',
+                'Accept-Charset': 'utf-8'
+            }
 
-        gz_url = f"https://fundgz.1234567.com.cn/js/{code}.js"
-        gz_response = await client.get(gz_url, headers=headers, timeout=10.0)
+            gz_url = f"https://fundgz.1234567.com.cn/js/{code}.js"
+            gz_response = await client.get(gz_url, headers=headers, timeout=10.0)
 
-        if gz_response.status_code == 200:
-            content = gz_response.text
-            if 'jsonpgz' in content and content.find('{') != -1:
-                start = content.find('({') + 1
-                end = content.rfind('})') + 1
-                if start > 0 and end > 0:
-                    gz_data = json.loads(content[start:end])
+            if gz_response.status_code == 200:
+                content = gz_response.text
+                if 'jsonpgz' in content and content.find('{') != -1:
+                    start = content.find('({') + 1
+                    end = content.rfind('})') + 1
+                    if start > 0 and end > 0:
+                        gz_data = json.loads(content[start:end])
+                        result = {
+                            'code': code,
+                            'name': gz_data.get('name', code),
+                            'nav': float(gz_data.get('dwjz', 0)),
+                            'change': float(gz_data.get('gszzl', 0)),
+                            'source': '天天基金网(实时估值)'
+                        }
+                        return JSONResponse(content=result, media_type="application/json; charset=utf-8")
+
+            api_url = f"https://api.fund.eastmoney.com/f10/lsjz?fundCode={code}&pageIndex=1&pageSize=1"
+            api_response = await client.get(api_url, headers=headers, timeout=10.0)
+
+            if api_response.status_code == 200:
+                data = api_response.json()
+                if data.get('Data') and data['Data'].get('LSJZList'):
+                    latest = data['Data']['LSJZList'][0]
+                    name_match = data['Data'].get('CodeName') or code
                     result = {
                         'code': code,
-                        'name': gz_data.get('name', code),
-                        'nav': float(gz_data.get('dwjz', 0)),
-                        'change': float(gz_data.get('gszzl', 0)),
-                        'source': '天天基金网(实时估值)'
+                        'name': name_match,
+                        'nav': float(latest.get('DWJZ', 0)),
+                        'change': float(latest.get('JZZZL', 0)),
+                        'source': '天天基金网(历史净值)'
                     }
                     return JSONResponse(content=result, media_type="application/json; charset=utf-8")
 
-        api_url = f"https://api.fund.eastmoney.com/f10/lsjz?fundCode={code}&pageIndex=1&pageSize=1"
-        api_response = await client.get(api_url, headers=headers, timeout=10.0)
-
-        if api_response.status_code == 200:
-            data = api_response.json()
-            if data.get('Data') and data['Data'].get('LSJZList'):
-                latest = data['Data']['LSJZList'][0]
-                name_match = data['Data'].get('CodeName') or code
-                result = {
-                    'code': code,
-                    'name': name_match,
-                    'nav': float(latest.get('DWJZ', 0)),
-                    'change': float(latest.get('JZZZL', 0)),
-                    'source': '天天基金网(历史净值)'
-                }
-                return JSONResponse(content=result, media_type="application/json; charset=utf-8")
-
-    raise HTTPException(status_code=404, detail=f"未找到基金代码: {code}")
+        raise HTTPException(status_code=404, detail=f"未找到基金代码: {code}")
+    except httpx.ConnectError:
+        raise HTTPException(status_code=502, detail="无法连接到天天基金网，请检查网络")
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="天天基金网请求超时，请重试")
 
 
 @app.post("/api/fund/holdings")
@@ -159,17 +169,18 @@ async def fund_holdings(query: FundQuery):
     if not code:
         raise HTTPException(status_code=400, detail="请输入基金代码")
 
-    async with httpx.AsyncClient() as client:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Referer': 'https://fundf10.eastmoney.com/',
-        }
+    try:
+        async with httpx.AsyncClient() as client:
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Referer': 'https://fundf10.eastmoney.com/',
+            }
 
-        url = f"https://fundf10.eastmoney.com/FundArchivesDatas.aspx?type=jjcc&code={code}&topline=10&year=&month=&rt=0."
-        response = await client.get(url, headers=headers, timeout=10.0)
+            url = f"https://fundf10.eastmoney.com/FundArchivesDatas.aspx?type=jjcc&code={code}&topline=10&year=&month=&rt=0."
+            response = await client.get(url, headers=headers, timeout=10.0)
 
-        if response.status_code != 200:
-            raise HTTPException(status_code=502, detail="获取持仓数据失败")
+            if response.status_code != 200:
+                raise HTTPException(status_code=502, detail="获取持仓数据失败")
 
         content = response.content.decode('utf-8', errors='replace')
 
@@ -218,6 +229,10 @@ async def fund_holdings(query: FundQuery):
             'reportDate': report_date,
             'holdings': holdings,
         }, media_type="application/json; charset=utf-8")
+    except httpx.ConnectError:
+        raise HTTPException(status_code=502, detail="无法连接到天天基金网，请检查网络")
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="天天基金网请求超时，请重试")
 
 
 @app.post("/api/fund/drawdowns")
@@ -226,20 +241,25 @@ async def fund_drawdowns(query: FundQuery):
     if not code:
         raise HTTPException(status_code=400, detail="请输入基金代码")
 
-    async with httpx.AsyncClient(follow_redirects=True) as client:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Referer': 'https://fund.eastmoney.com/',
-        }
-        url = f"https://fund.eastmoney.com/pingzhongdata/{code}.js"
-        resp = await client.get(url, headers=headers, timeout=15.0)
-        if resp.status_code != 200:
-            raise HTTPException(status_code=502, detail="获取基金数据失败")
+    try:
+        async with httpx.AsyncClient(follow_redirects=True) as client:
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Referer': 'https://fund.eastmoney.com/',
+            }
+            url = f"https://fund.eastmoney.com/pingzhongdata/{code}.js"
+            resp = await client.get(url, headers=headers, timeout=15.0)
+            if resp.status_code != 200:
+                raise HTTPException(status_code=502, detail="获取基金数据失败")
 
-        m = re.search(r'var Data_ACWorthTrend\s*=\s*(\[.*?\])\s*;', resp.text, re.DOTALL)
-        if not m:
-            raise HTTPException(status_code=502, detail="未找到净值数据")
-        nav_data = json.loads(m.group(1))
+            m = re.search(r'var Data_ACWorthTrend\s*=\s*(\[.*?\])\s*;', resp.text, re.DOTALL)
+            if not m:
+                raise HTTPException(status_code=502, detail="未找到净值数据")
+            nav_data = json.loads(m.group(1))
+    except httpx.ConnectError:
+        raise HTTPException(status_code=502, detail="无法连接到天天基金网，请检查网络")
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="天天基金网请求超时，请重试")
 
     # 按日期升序排序
     nav_data.sort(key=lambda x: x[0])
