@@ -5,6 +5,7 @@ import httpx
 import os
 import json
 import sys
+import re
 
 sys.stdout.reconfigure(encoding='utf-8')
 
@@ -72,12 +73,23 @@ async def chat(request: LLMRequest):
         "temperature": 0.7
     }
 
-    async with httpx.AsyncClient() as client:
-        response = await client.post(url, json=payload, headers=headers, timeout=60.0)
-        if response.status_code != 200:
-            raise HTTPException(status_code=response.status_code, detail=response.text)
-        result = response.json()
-        return {"response": result["choices"][0]["message"]["content"]}
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url, json=payload, headers=headers, timeout=60.0)
+            if response.status_code != 200:
+                detail = (response.text[:500] if response.text else f"status {response.status_code}")
+                raise HTTPException(status_code=502, detail=f"LLM error: {detail}")
+            result = response.json()
+            return {"response": result["choices"][0]["message"]["content"]}
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="LLM API timeout, please retry")
+    except httpx.ConnectError:
+        raise HTTPException(status_code=502, detail="Cannot connect to LLM API")
+    except HTTPException:
+        raise
+    except Exception as e:
+        err = repr(e)[:200]
+        raise HTTPException(status_code=500, detail=f"AI analysis failed: {err}")
 
 
 @app.post("/api/fund/query")
@@ -130,6 +142,50 @@ async def query_fund(query: FundQuery):
                 return JSONResponse(content=result, media_type="application/json; charset=utf-8")
 
     raise HTTPException(status_code=404, detail=f"未找到基金代码: {code}")
+
+
+@app.post("/api/fund/holdings")
+async def fund_holdings(query: FundQuery):
+    code = query.code.strip()
+    if not code:
+        raise HTTPException(status_code=400, detail="请输入基金代码")
+
+    async with httpx.AsyncClient() as client:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Referer': 'https://fundf10.eastmoney.com/',
+        }
+
+        url = f"https://fundf10.eastmoney.com/FundArchivesDatas.aspx?type=jjcc&code={code}&topline=10&year=&month=&rt=0."
+        response = await client.get(url, headers=headers, timeout=10.0)
+
+        if response.status_code != 200:
+            raise HTTPException(status_code=502, detail="获取持仓数据失败")
+
+        content = response.content.decode('utf-8', errors='replace')
+
+        holdings = []
+        pattern = r'<tr><td>(\d+)</td><td><a[^>]*>([^<]+)</a></td><td[^>]*><a[^>]*>([^<]+)</a></td><td[^>]*><span[^>]*></span></td><td[^>]*><span[^>]*></span></td><td[^>]*>(?:<a[^>]*>[^<]*</a>)+</td><td[^>]*>([^<]+)</td>'
+        matches = re.findall(pattern, content)
+
+        date_match = re.search(r'(\d{4}-\d{2}-\d{2})', content)
+        report_date = date_match.group(1) if date_match else ""
+
+        for m in matches:
+            rank, stock_code, stock_name, pct_str = m
+            pct = float(pct_str.strip('%'))
+            holdings.append({
+                'rank': int(rank),
+                'stockCode': stock_code,
+                'stockName': stock_name,
+                'percent': pct,
+            })
+
+        return JSONResponse(content={
+            'code': code,
+            'reportDate': report_date,
+            'holdings': holdings,
+        }, media_type="application/json; charset=utf-8")
 
 
 if __name__ == "__main__":

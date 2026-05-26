@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts'
 
 const DarkYellowStyle = {
   colors: {
@@ -24,6 +25,21 @@ interface FundData {
   source: string
 }
 
+interface Holding {
+  rank: number
+  stockCode: string
+  stockName: string
+  percent: number
+}
+
+interface HoldingsData {
+  code: string
+  reportDate: string
+  holdings: Holding[]
+}
+
+const COLORS = ['#FFD700', '#FFA500', '#FF6B6B', '#52C41A', '#1890FF', '#722ED1', '#EB2F96', '#13C2C2', '#FA8C16', '#2F54EB']
+
 function App() {
   const [apiKey, setApiKey] = useState('')
   const [showConfig, setShowConfig] = useState(false)
@@ -40,6 +56,10 @@ function App() {
   const [aiLoading, setAiLoading] = useState(false)
   const [aiError, setAiError] = useState('')
 
+  const [holdingsData, setHoldingsData] = useState<HoldingsData | null>(null)
+  const [holdingsLoading, setHoldingsLoading] = useState(false)
+  const [holdingsError, setHoldingsError] = useState('')
+
   useEffect(() => {
     checkConfig()
     const interval = setInterval(checkConfig, 5000)
@@ -51,9 +71,8 @@ function App() {
       const res = await fetch('/api/llm/config')
       const data = await res.json()
       setConfigStatus(data)
-      setError('')
     } catch (e) {
-      setError('无法连接到后端服务')
+      setConfigStatus(null)
       console.error('API 连接失败:', e)
     }
   }
@@ -94,6 +113,8 @@ function App() {
     setFundError('')
     setFundData(null)
     setAiAnalysis('')
+    setHoldingsData(null)
+    setHoldingsError('')
     try {
       const res = await fetch('/api/fund/query', {
         method: 'POST',
@@ -103,6 +124,7 @@ function App() {
       const data = await res.json()
       if (res.ok) {
         setFundData(data)
+        fetchHoldings(fundCode.trim())
       } else {
         setFundError(data.detail || '查询失败')
       }
@@ -110,6 +132,27 @@ function App() {
       setFundError(`网络错误: ${e.message}`)
     }
     setFundLoading(false)
+  }
+
+  const fetchHoldings = async (code: string) => {
+    setHoldingsLoading(true)
+    setHoldingsError('')
+    try {
+      const res = await fetch('/api/fund/holdings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code })
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setHoldingsData(data)
+      } else {
+        setHoldingsError(data.detail || '获取持仓失败')
+      }
+    } catch (e: any) {
+      setHoldingsError(`网络错误: ${e.message}`)
+    }
+    setHoldingsLoading(false)
   }
 
   const analyzeWithAI = async () => {
@@ -125,14 +168,20 @@ function App() {
           prompt: `请分析基金 ${fundData.name}(${fundData.code})，当前净值: ${fundData.nav}，涨跌幅: ${fundData.change}%。给出简要评价和建议。`
         })
       })
-      const data = await res.json()
+      const body = await res.text()
+      let data
+      try {
+        data = JSON.parse(body)
+      } catch {
+        throw new Error(body || `请求失败 (${res.status})`)
+      }
       if (res.ok) {
         setAiAnalysis(data.response || '未收到有效回复')
       } else {
-        setAiError(data.detail || '分析失败')
+        setAiError(data.detail || `分析失败 (${res.status})`)
       }
     } catch (e: any) {
-      setAiError(`网络错误: ${e.message}`)
+      setAiError(e.message || 'AI 分析请求失败')
     }
     setAiLoading(false)
   }
@@ -149,8 +198,32 @@ function App() {
         color: '#000000',
         padding: '20px 40px',
         boxShadow: '0 2px 4px rgba(0,0,0,0.3)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
       }}>
         <h1 style={{ margin: 0, fontSize: '24px', fontWeight: 600 }}>基金分析助手</h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div style={{
+            width: '8px', height: '8px', borderRadius: '50%',
+            backgroundColor: configStatus?.configured ? '#52C41A' : '#FFA500',
+          }} />
+          <button
+            onClick={() => { setError(''); setShowConfig(true); }}
+            style={{
+              backgroundColor: '#000000',
+              color: DarkYellowStyle.colors.primary,
+              border: 'none',
+              padding: '8px 16px',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '13px',
+              fontWeight: 500,
+            }}
+          >
+            配置 API
+          </button>
+        </div>
       </header>
 
       <main style={{ padding: '40px', maxWidth: '900px', margin: '0 auto' }}>
@@ -253,6 +326,135 @@ function App() {
             </div>
           )}
 
+          {holdingsLoading && (
+            <div style={{ padding: '12px', color: DarkYellowStyle.colors.textLight, fontSize: '14px' }}>
+              加载持仓数据...
+            </div>
+          )}
+
+          {holdingsError && (
+            <div style={{
+              padding: '12px', backgroundColor: '#3d2020', borderRadius: '4px',
+              marginBottom: '20px', color: DarkYellowStyle.colors.error, fontSize: '14px',
+            }}>
+              {holdingsError}
+            </div>
+          )}
+
+          {holdingsData && holdingsData.holdings.length > 0 && (
+            <div style={{
+              backgroundColor: DarkYellowStyle.colors.inputBg,
+              borderRadius: '8px',
+              padding: '20px',
+              marginBottom: '20px',
+            }}>
+              <h3 style={{ margin: '0 0 4px 0', color: DarkYellowStyle.colors.primary, fontSize: '16px' }}>
+                前十大持仓股票
+              </h3>
+              <div style={{ fontSize: '12px', color: DarkYellowStyle.colors.textLight, marginBottom: '16px' }}>
+                报告日期: {holdingsData.reportDate}
+              </div>
+
+              <div style={{ display: 'flex', gap: '24px', alignItems: 'stretch' }}>
+                <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+                  <div style={{ flex: 1, minHeight: 0 }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={holdingsData.holdings}
+                          dataKey="percent"
+                          nameKey="stockName"
+                          cx="50%"
+                          cy="55%"
+                          outerRadius={90}
+                          label={({ stockName, percent, cx, cy, midAngle, outerRadius }) => {
+                            const RADIAN = Math.PI / 180
+                            const radius = outerRadius + 30
+                            const x = cx + radius * Math.cos(-midAngle * RADIAN)
+                            const y = cy + radius * Math.sin(-midAngle * RADIAN)
+                            return (
+                              <text x={x} y={y} fontSize={11} fill={DarkYellowStyle.colors.textLight} textAnchor={x > cx ? 'start' : 'end'}>
+                                {stockName} {percent}%
+                              </text>
+                            )
+                          }}
+                          labelLine
+                        >
+                          {holdingsData.holdings.map((_, idx) => (
+                            <Cell key={idx} fill={COLORS[idx % COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip formatter={(value: number) => `${value}%`} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'center' }}>
+                  <ul style={{
+                    listStyle: 'none', margin: 0, padding: 0,
+                    display: 'grid',
+                    gridTemplateColumns: '1fr 1fr',
+                    gap: '2px 24px',
+                    fontSize: '11px',
+                    paddingTop: '12px',
+                  }}>
+                    {holdingsData.holdings.map((h, idx) => (
+                      <li key={idx} style={{
+                        display: 'flex', alignItems: 'center', gap: '6px',
+                        color: DarkYellowStyle.colors.textLight,
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                      }}>
+                        <span style={{
+                          display: 'inline-block',
+                          width: 8, height: 8,
+                          borderRadius: '50%',
+                          backgroundColor: COLORS[idx % COLORS.length],
+                          flexShrink: 0,
+                        }} />
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {h.stockName}
+                        </span>
+                        <span style={{ color: DarkYellowStyle.colors.primary, flexShrink: 0 }}>
+                          {h.percent}%
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  </div>
+                </div>
+
+                <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                    <thead>
+                      <tr style={{ borderBottom: `1px solid ${DarkYellowStyle.colors.border}` }}>
+                        <th style={{ textAlign: 'left', padding: '8px 4px', color: DarkYellowStyle.colors.textLight }}>排名</th>
+                        <th style={{ textAlign: 'left', padding: '8px 4px', color: DarkYellowStyle.colors.textLight }}>股票名称</th>
+                        <th style={{ textAlign: 'right', padding: '8px 4px', color: DarkYellowStyle.colors.textLight }}>占比</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {holdingsData.holdings.map((h) => (
+                        <tr key={h.rank} style={{ borderBottom: `1px solid ${DarkYellowStyle.colors.border}` }}>
+                          <td style={{ padding: '8px 4px', color: DarkYellowStyle.colors.textLight }}>{h.rank}</td>
+                          <td style={{ padding: '8px 4px', color: DarkYellowStyle.colors.text }}>
+                            {h.stockName}
+                            <span style={{ color: DarkYellowStyle.colors.textLight, marginLeft: '6px', fontSize: '12px' }}>
+                              {h.stockCode}
+                            </span>
+                          </td>
+                          <td style={{ padding: '8px 4px', textAlign: 'right', color: DarkYellowStyle.colors.primary, fontWeight: 500 }}>
+                            {h.percent}%
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
           {fundData && (
             <button
               onClick={analyzeWithAI}
@@ -297,52 +499,32 @@ function App() {
               <h4 style={{ margin: '0 0 12px 0', color: DarkYellowStyle.colors.primary, fontSize: '15px' }}>
                 AI 分析结果
               </h4>
-              <p style={{ margin: 0, color: DarkYellowStyle.colors.text, fontSize: '14px', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
-                {aiAnalysis}
-              </p>
+              <div style={{ color: DarkYellowStyle.colors.text, fontSize: '14px', lineHeight: 1.8 }}>
+                {aiAnalysis.split('\n').filter(l => l.trim()).map((line, i) => (
+                  <p key={i} style={{ margin: '0 0 8px 0' }}>{line}</p>
+                ))}
+              </div>
             </div>
           )}
         </div>
 
-        <div style={{
-          backgroundColor: DarkYellowStyle.colors.cardBg,
-          borderRadius: '8px',
-          padding: '30px',
-          boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <h2 style={{ margin: 0, color: DarkYellowStyle.colors.primary, fontSize: '18px', fontWeight: 500 }}>
-                LLM API 配置
-              </h2>
-              <span style={{ fontSize: '12px', color: DarkYellowStyle.colors.textLight }}>
-                后端: {configStatus !== null ? '✓ 已连接' : '✗ 未连接'}
-              </span>
-            </div>
-            <button
-              onClick={() => setShowConfig(!showConfig)}
-              style={{
-                backgroundColor: DarkYellowStyle.colors.primary,
-                color: '#000000',
-                border: 'none',
-                padding: '10px 20px',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontSize: '14px',
-                fontWeight: 500,
-              }}
-            >
-              {showConfig ? '隐藏配置' : '配置 API'}
-            </button>
-          </div>
-
-          {showConfig && (
+        {showConfig && (
+          <div style={{
+            position: 'fixed', inset: 0, zIndex: 1000,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            backgroundColor: 'rgba(0,0,0,0.6)',
+          }} onClick={() => setShowConfig(false)}>
             <div style={{
-              padding: '20px',
-              backgroundColor: DarkYellowStyle.colors.inputBg,
+              backgroundColor: DarkYellowStyle.colors.cardBg,
               borderRadius: '8px',
-              marginBottom: '20px',
-            }}>
+              padding: '30px',
+              width: '420px',
+              maxWidth: '90vw',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+            }} onClick={e => e.stopPropagation()}>
+              <h2 style={{ margin: '0 0 20px 0', color: DarkYellowStyle.colors.primary, fontSize: '18px', fontWeight: 500 }}>
+                配置 LLM API Key
+              </h2>
               <label style={{ display: 'block', marginBottom: '8px', color: DarkYellowStyle.colors.text, fontSize: '14px' }}>
                 硅基流动 API Key
               </label>
@@ -351,6 +533,7 @@ function App() {
                 value={apiKey}
                 onChange={e => setApiKey(e.target.value)}
                 placeholder="sk-xxxx..."
+                autoFocus
                 style={{
                   width: '100%',
                   padding: '12px',
@@ -361,65 +544,51 @@ function App() {
                   borderRadius: '4px',
                   boxSizing: 'border-box',
                 }}
+                onKeyDown={e => e.key === 'Enter' && saveConfig()}
               />
-              <button
-                onClick={saveConfig}
-                disabled={loading}
-                style={{
-                  marginTop: '16px',
-                  backgroundColor: DarkYellowStyle.colors.primary,
-                  color: '#000000',
-                  border: 'none',
-                  padding: '12px 32px',
-                  borderRadius: '4px',
-                  cursor: loading ? 'not-allowed' : 'pointer',
-                  fontSize: '14px',
-                  fontWeight: 500,
-                  opacity: loading ? 0.7 : 1,
-                }}
-              >
-                {loading ? '保存中...' : '保存'}
-              </button>
+              {error && (
+                <div style={{ padding: '10px 0', color: DarkYellowStyle.colors.error, fontSize: '13px' }}>
+                  {error}
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: '12px', marginTop: '20px' }}>
+                <button
+                  onClick={() => setShowConfig(false)}
+                  style={{
+                    flex: 1,
+                    backgroundColor: 'transparent',
+                    color: DarkYellowStyle.colors.textLight,
+                    border: `1px solid ${DarkYellowStyle.colors.border}`,
+                    padding: '12px',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                  }}
+                >
+                  取消
+                </button>
+                <button
+                  onClick={saveConfig}
+                  disabled={loading}
+                  style={{
+                    flex: 1,
+                    backgroundColor: DarkYellowStyle.colors.primary,
+                    color: '#000000',
+                    border: 'none',
+                    padding: '12px',
+                    borderRadius: '4px',
+                    cursor: loading ? 'not-allowed' : 'pointer',
+                    fontSize: '14px',
+                    fontWeight: 500,
+                    opacity: loading ? 0.7 : 1,
+                  }}
+                >
+                  {loading ? '保存中...' : '保存'}
+                </button>
+              </div>
             </div>
-          )}
-
-          {error && (
-            <div style={{
-              padding: '12px',
-              backgroundColor: '#3d2020',
-              borderRadius: '4px',
-              marginBottom: '20px',
-              color: DarkYellowStyle.colors.error,
-              fontSize: '14px',
-            }}>
-              {error}
-            </div>
-          )}
-
-          <div style={{
-            padding: '20px',
-            backgroundColor: configStatus?.configured ? '#1d3d1d' : '#3d3d20',
-            borderRadius: '8px',
-            border: `1px solid ${configStatus?.configured ? '#2d5a2d' : '#5a5a2d'}`,
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <div style={{
-                width: '10px',
-                height: '10px',
-                borderRadius: '50%',
-                backgroundColor: configStatus?.configured ? DarkYellowStyle.colors.success : DarkYellowStyle.colors.accent,
-              }} />
-              <span style={{ color: DarkYellowStyle.colors.text, fontSize: '14px' }}>
-                状态: {configStatus?.configured ? '已配置' : '未配置'}
-              </span>
-            </div>
-            {configStatus?.configured && configStatus.api_key && (
-              <p style={{ margin: '8px 0 0 18px', color: DarkYellowStyle.colors.textLight, fontSize: '13px' }}>
-                API Key: {configStatus.api_key}
-              </p>
-            )}
           </div>
-        </div>
+        )}
       </main>
     </div>
   )
