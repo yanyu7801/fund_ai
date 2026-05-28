@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts'
+import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, LabelList } from 'recharts'
 
 const DarkYellowStyle = {
   colors: {
@@ -535,23 +535,25 @@ function App() {
                   <BarChart
                     data={drawdownsData.drawdowns.map(d => ({
                       ...d,
-                      label: `${d.startDate}~${d.endDate === d.troughDate ? d.troughDate : d.endDate}`,
+                      label: `${d.startDate}~${d.endDate === d.troughDate ? d.troughDate : d.endDate} (${d.duration}天)`,
                       absDrawdown: Math.abs(d.maxDrawdown),
                     })).reverse()}
                     layout="vertical"
-                    margin={{ top: 0, right: 20, left: 80, bottom: 0 }}
+                    margin={{ top: 0, right: 40, left: 110, bottom: 0 }}
                   >
                     <XAxis type="number" domain={[0, 'auto']} tick={{ fill: DarkYellowStyle.colors.textLight, fontSize: 11 }} unit="%" />
-                    <YAxis type="category" dataKey="label" width={80} tick={{ fill: DarkYellowStyle.colors.textLight, fontSize: 10 }} />
+                    <YAxis type="category" dataKey="label" width={110} tick={{ fill: DarkYellowStyle.colors.textLight, fontSize: 10 }} />
                     <Tooltip
                       formatter={(_: any, __: any, props: any) => {
                         const d = props.payload
-                        return [`${d.maxDrawdown}%`, `回撤`]
+                        return [`${d.maxDrawdown}%`, `回撤幅度`]
                       }}
                       labelFormatter={() => ''}
                       contentStyle={{ backgroundColor: '#2d2d2d', border: '1px solid #444', fontSize: 12 }}
                     />
-                    <Bar dataKey="absDrawdown" fill="#FF6B6B" radius={[0, 3, 3, 0]} />
+                    <Bar dataKey="absDrawdown" fill="#FF6B6B" radius={[0, 3, 3, 0]}>
+                      <LabelList dataKey="absDrawdown" position="right" fill="#F0F0F0" fontSize={11} formatter={(_: any) => `${_}天` as any} />
+                    </Bar>
                   </BarChart>
                 </ResponsiveContainer>
               </div>
